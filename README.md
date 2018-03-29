@@ -1,5 +1,7 @@
 # The Binder Architecture
 
+> Note: This document is a work in progress.
+
 The Binder architecture is a declarative architecture for iOS development inspired by MVVM and VIPER. It is an attempt to take the best ideas of MVVM and VIPER and implement them without the boilerplate code that the two architectures, especially the latter, suffer from. 
 
 The central idea of the Binder architecture is implementing application logic as a function, as opposed to the object. In place of the ViewModel or Presenter, the Binder architecture defines a function called *the binder*. Such approach enforces declarative application logic that provides all the benefits of declarative paradigm and results in a significant reduction of the boilerplate code that we can find in MVVM and VIPER.
@@ -244,7 +246,7 @@ Since the Binder binds two layers of the architecture together and because it do
 
 ### Is There a Demo Project?
 
-Yes! *TODO*
+Yes! Check out [AbsurdGitter](https://github.com/DeclarativeHub/AbsurdGitter). 
 
 ## Conclusion
 
