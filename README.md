@@ -261,6 +261,7 @@ Each subgraph will have a root view controller. In our example, those would be t
 
 A way to solve the dependency pyramid of doom is to let each subgraph's root view controller handle the navigation of the subgraph it defines. View controllers in the subgraph would delegate their navigation to the subgraph's root view controller which would, in turn, resolve the dependencies. Root view controllers themselves would depend on a top-level dependency, e.g. a session, that provides other dependencies.
 
+TODO: Implementation example.
 
 ## Discussion
 
