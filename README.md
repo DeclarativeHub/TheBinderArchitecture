@@ -234,7 +234,7 @@ extension ProfileViewController {
             .bind(to: viewController) { viewController in 
                 let friendService = ???
                 let friendsViewController = FriendsViewController.makeViewController(friendService)
-                viewController.navigationController?.push(friendsViewController, animated: true)
+                viewController.navigationController?.pushViewController(friendsViewController, animated: true)
             }
         ...
     }
@@ -259,9 +259,144 @@ We can partition the navigation graph into subgraphs. A natural way to do it wou
 
 Each subgraph will have a root view controller. In our example, those would be the two navigation controllers representing blue and purple subgraphs and a tab bar controller representing the whole graph.
 
-A way to solve the dependency pyramid of doom is to let each subgraph's root view controller handle the navigation of the subgraph it defines. View controllers in the subgraph would delegate their navigation to the subgraph's root view controller which would, in turn, resolve the dependencies. Root view controllers themselves would depend on a top-level dependency, e.g. a session, that provides other dependencies.
+A way to solve the dependency pyramid of doom is to let each subgraph's root view controller handle the navigation for the subgraph it defines. View controllers in the subgraph would delegate their navigation to the subgraph's root view controller which would, in turn, resolve the dependencies. Root view controllers themselves would depend on a top-level dependency, e.g. a session, that provides other dependencies.
 
-TODO: Implementation example.
+How do we delegate navigation to the subgraph root view controller? There is a number of ways we could do that, but here is one: expose navigations paths, routes, as a signal and have the binder return both the view controller and the routes signal. We can do that with a publish subject, but let us wrap it into something nicer.
+
+```swift
+public class Router<Route> {
+
+    private let _routes = SafePublishSubject<Route>()
+
+    /// Emits a route when requested by the view controller that is using the router.
+    public var routes: SafeSignal<Route> {
+        return _routes.toSignal()
+    }
+
+    public init() {}
+
+    /// Navigate to the given route.
+    public func navigate(to route: Route) {
+        _routes.next(route)
+    }
+}
+```
+
+The binder can then instantiate the router and return it alongside the view controller. We can also define a container object for the two instead of returning the tuple. Let us call it `Wireframe`.
+
+```swift
+/// Wireframe is just an object that contains a view controller and a router.
+public class Wireframe<ViewController, Routes> {
+
+    public let viewController: ViewController
+    public let router: Router<Routes>
+
+    public init(for viewController: ViewController, router: Router<Routes>) {
+        self.viewController = viewController
+        self.router = router
+    }
+}
+```
+
+With those two defined we can now refactor our example binder.
+
+```swift
+extension ProfileViewController {
+
+    // Routes define all navigations paths that can be taken from this VC
+    enum Routes {
+        case editProfile
+        case friends(ofUser: User)
+    }
+
+    // We've renamed our binder accordingly
+    static func makeWireframe(_ userService: UserService) -> Wireframe<ProfileViewController, Routes> {
+        let viewController = ProfileViewController()
+        let router = Router<Routes>()
+        
+        ...
+        
+        viewController.editProfileButton.reactive.tap
+            .bind(to: viewController) { _ in 
+                router.navigate(to: .editProfile)
+            }
+            
+        viewController.friendsButton.reactive.tap
+            .bind(to: viewController) { _ in 
+                router.navigate(to: .friends(ofUser: userService.user)
+            }
+        
+        return Wireframe(for: viewController, router: router)
+    }
+}
+``` 
+
+Binder now does not present other view controllers, it just triggers the navigation by calling `navigate(to:)` on the router. What is left is to actually perform the navigation. That will be done in the binder of the navigation subgraph's root view controller. Let us assume that our `ProfileViewController` is part of a navigation stack managed by `UINavigationController`. We would implement its binder like this:
+
+```swift
+/// Subclassing gives us the type for our navigation stack...
+class UserNavigationController: UINavigationController {}
+
+/// ...so that we can create a binder only for the specific navigation controller, not for all UINavigationControllers
+extension UserNavigationController {
+
+    static func makeWireframe(_ session: Session) -> Wireframe<UserNavigationController, Void> {
+
+        // ProfileViewController will be our navigation controller's root view controller 
+        let profileWireframe = ProfileViewController.makeWireframe(session.userService)
+        let navigationController = UserNavigationController(rootViewController: profileWireframe.viewController)
+
+        // Handle all routes from ProfileViewController:
+        profileWireframe.router.routes.bind(to: navigationController) { navigationController, route in
+            switch route {
+            case .editProfile:
+                navigationController.presentEditProfileViewController(session: session)
+            case .friends(let user):
+                navigationController.pushFriendsViewController(ofUser: user, session: session)
+            }
+        }
+
+        return Wireframe(for: navigationController)
+    }
+
+    /// Routes can be implemented as method extensions on the view controller.
+    func presentEditProfileViewController(session: Session) {
+        let wireframe = EditProfileViewController.makeWireframe(session.userService)
+
+        // Handle all routes from EditProfileViewController, if any.
+        wireframe.router.routes.bind(to: self) { navigationController, route in
+            switch route {
+                ...
+            }
+        }
+
+        present(wireframe.viewController, animated: true)
+    }
+
+    // Another routing method
+    func pushFriendsViewController(ofUser user: User, session: Session) {
+        let service = FriendsService(user: user, session: Session)
+        let wireframe = FriendsViewController.makeWireframe(service)
+
+        // Handle all routes from FriendsViewController wireframe, if any.
+        wireframe.router.routes.bind(to: self) { navigationController, route in
+            switch route {
+                ...
+            }
+        }
+
+        pushViewController(wireframe.viewController, animated: true)
+    }
+}
+```
+
+The first thing that should be noticed is that we are implementing a binder for the navigation controller. This is a very good approach as it is only natural for the navigation controller to manage its stack. It does that by performing specific routes from its child view controllers.
+
+Next, notice that this binder has a dependency on something called `Session`. Navigation controllers, as well as other navigation subgraph's root view controllers, should depend on the top-level dependency from which one can get or create other dependencies. Having something like a `Session` object that vends other dependencies is a good approach even for the apps that do not have any concept of a user.
+
+With this approach, child view controllers do not need to have dependencies that they do not use. In our example, `ProfileViewController` does not need `FriendsService` as a dependency. It can just trigger a specific route and the `UserNavigationController`'s binder will resolve the dependency.
+
+Routing and dependency injection is probably the most complex aspect of this architecture, but once you grasp it you will see how simple and logical it is. Be sure to check out the [demo app](https://github.com/DeclarativeHub/AbsurdGitter) for a working example.
 
 ## Discussion
 
