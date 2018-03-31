@@ -187,6 +187,81 @@ I like to call this function **the Binder** because it binds two architectural l
 
 With those three rules you can implement any Binder, i.e. connect any Service to any View Controller. Through those three rules you express  your applications logic — what loads when, what displays where, what formats how, etc. It really is as simple as that.
 
+## Navigation (Routing)
+
+When thinking about app navigation, we must ask ourselves two questions: 
+
+1. Who initiates the navigation?
+2. Who performs the navigation?
+
+Navigation is most commonly initiated by the user tapping a button or performing some other action. Alternatively, navigation can be triggered by an event from the business logic. A code that handles both user actions and business logic events is the application logic code - in our case the binder function. That answers the first question.
+
+The answer to the second questions should already be known to those familiar with UIKit. It is view controllers that perform navigation. View controllers present other view controllers. They present them in a navigation stack in case of UINavigationController, in a tab container in case of UITabBarController, modally in case of calling `present` method or in some other built-in or custom way.
+
+Binders both implement the application logic and create view controllers. Does that mean that they should also implement the navigation? The answer is yes, however, there is a couple of ways to do it.
+
+### Basic Case
+
+Let us say that our `ProfileViewController` has a button that should open a view controller where the user can edit their profile. We can implement such navigation in the following way:
+
+```swift
+extension ProfileViewController {
+
+    static func makeViewController(_ userService: UserService) -> ProfileViewController {
+        ...
+        viewController.editProfileButton.reactive.tap
+            .bind(to: viewController) { viewController in 
+                let editProfileVC = EditProfileViewController.makeViewController(userService)
+                viewController.present(editProfileVC, animated: true)
+            }
+        ...
+    }
+}
+```
+
+We observe button tap evens with a binding and present the new view controller when the event occurs. Simple.
+
+#### Dependency Piramid of Doom
+
+`EditProfileViewController` has the same dependency as `ProfileViewController` - `UserService`. However, what if that was not the case? What if the view controller that we are about to present has some other dependency unknown to `ProfileViewController`? Let us consider something like the navigation to a friend list that depends on an arbitrary `FriendsService`. Following the same approach
+
+```swift
+extension ProfileViewController {
+
+    static func makeViewController(_ userService: UserService) -> ProfileViewController {
+        ...
+        viewController.friendsButton.reactive.tap
+            .bind(to: viewController) { viewController in 
+                let friendService = ???
+                let friendsViewController = FriendsViewController.makeViewController(friendService)
+                viewController.navigationController?.push(friendsViewController, animated: true)
+            }
+        ...
+    }
+}
+```
+
+we would end up in a big trouble. Where do we get `friendService` from? Passing it to binder (to the `makeViewController`) is a bad idea. `ProfileViewController` does not use it so it would be redundant. The approach would also not scale well. We would have to pass in dependencies for all the navigation paths that we can take and for all the navigation paths that we can take from every previous navigation path and so on. Basically, a binder would have to take in all dependencies used by every view controller in the navigation graph that starts at the binder.  
+
+Would it be easier to just make `FriendsService` a singleton? No, singletons are out of the question!
+
+This is a classic dependency injection problem. A dependency injection framework could help, but that would not be fun. We can actually solve this ourselves in a clean way.
+
+### General Case
+
+Consider the following navigation graph of an imaginary app. It represents an app that has a tab bar controller as a root view controller. The tab bar controller has two tabs. Each tab is a navigation stack that can push three different view controllers. 
+
+<img src="Assets/navigation-graph@2x.png" width="610px">
+
+A user can, for example, navigate from A purple to C purple and then to B purple. They cannot navigation from A purple to B purple.
+
+We can partition the navigation graph into subgraphs. A natural way to do it would be based on the container view controllers like tab bar controller, navigation controller, split controller, etc. There could be other ways to partition the graph though. In our example, first tab's navigation stack would represent one subgraph (blue), while second tab's navigation stack would represent another subgraph (purple).
+
+Each subgraph will have a root view controller. In our example, those would be the two navigation controllers representing blue and purple subgraphs and a tab bar controller representing the whole graph.
+
+A way to solve the dependency pyramid of doom is to let each subgraph's root view controller handle the navigation of the subgraph it defines. View controllers in the subgraph would delegate their navigation to the subgraph's root view controller which would, in turn, resolve the dependencies. Root view controllers themselves would depend on a top-level dependency, e.g. a session, that provides other dependencies.
+
+
 ## Discussion
 
 ### Ownership
@@ -200,10 +275,6 @@ Who owns the Services and other business logic layer objects? Turns out that nob
 3. *A service handles user actions or accepts user data*. We said earlier that we will be observing that kind of data with the Services’ instance methods. Signals/Observables retain their observers which are in our case the Service instance methods so that will in turn retain the Service itself. We will always put the observation disposable in the View Controller’s dispose bag to ensure  that the observation is disposed when the View Controller is deallocated.
 
 You might ask yourself why don’t we bind user actions and user input to the Service. The reason is that bindings, as opposed to the observations, do not retain their targets. We need the Service alive when action happens - case #3.
-
-### Routing
-
-*TODO*
 
 ### Massive Binders
 
@@ -236,7 +307,7 @@ With [RxSwift](https://github.com/ReactiveX/RxSwift) one could leverage Observab
 
 The reason I am blatantly promoting [ReactiveKit](https://github.com/DeclarativeHub/ReactiveKit) and [Bond](https://github.com/DeclarativeHub/Bond) in this article is that I am the author of the two. They are by no means a requirement for this architecture, but they do offer some perks like safe signals, bindings that automatically handle threading, [inline bindings](https://github.com/DeclarativeHub/ReactiveKit#bindings), [loading signals](https://github.com/DeclarativeHub/ReactiveKit#loading-signals) that enable simple lodading state side effects and [observable collection](https://github.com/DeclarativeHub/Bond#observablearray--mutableobservablearray) with out of the box diffing. As I have been evolving the Binder architecture over time, so were the two libraries shaped to make them perfect fit for the architecture.
 
-### Is this a new architecture?
+### Is This a New Architecture?
 
 Yes and no. Although it required some thinking and a lot of experimentation before I came up with it, the architecture seems to be a variation of [Model-View-Adapter](https://en.wikipedia.org/wiki/Model–view–adapter) where the Binder takes place of the Adapter. The Binder, conceptually, is the Adapter because it solves the same problem with the same constraints, however, our Binder is a function —  not a traditional object like the Adapter.
 
