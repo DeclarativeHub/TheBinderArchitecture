@@ -244,7 +244,7 @@ Since the Binder binds two layers of the architecture together and because it do
 
 ### Is There a Demo Project?
 
-Yes! *TODO*
+Yes! Check out [AbsurdGitter](https://github.com/DeclarativeHub/AbsurdGitter). 
 
 ## Conclusion
 
