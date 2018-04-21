@@ -200,8 +200,6 @@ The answer to the second questions should already be known to those familiar wit
 
 Binders both implement the application logic and create view controllers. Does that mean that they should also implement the navigation? The answer is yes, however, there is a couple of ways to do it.
 
-### Basic Case
-
 Let us say that our `ProfileViewController` has a button that should open a view controller where the user can edit their profile. We can implement such navigation in the following way:
 
 ```swift
@@ -221,7 +219,7 @@ extension ProfileViewController {
 
 We observe button tap evens with a binding and present the new view controller when the event occurs. Simple.
 
-#### Dependency Piramid of Doom
+#### Dependency Piramid Problem
 
 `EditProfileViewController` has the same dependency as `ProfileViewController` - `UserService`. However, what if that was not the case? What if the view controller that we are about to present has some other dependency unknown to `ProfileViewController`? Let us consider something like the navigation to a friend list that depends on an arbitrary `FriendsService`. Following the same approach
 
@@ -241,162 +239,53 @@ extension ProfileViewController {
 }
 ```
 
-we would end up in a big trouble. Where do we get `friendService` from? Passing it to binder (to the `makeViewController`) is a bad idea. `ProfileViewController` does not use it so it would be redundant. The approach would also not scale well. We would have to pass in dependencies for all the navigation paths that we can take and for all the navigation paths that we can take from every previous navigation path and so on. Basically, a binder would have to take in all dependencies used by every view controller in the navigation graph that starts at the binder.  
+we would end up in a trouble. Where do we get `friendService` from? Passing it to binder (to the `makeViewController`) is a bad idea. `ProfileViewController` does not use it so it would be redundant. Could we just make `FriendsService` a singleton? No, singletons are out of the question!
 
-Would it be easier to just make `FriendsService` a singleton? No, singletons are out of the question!
+This is a classic dependency injection problem. A dependency injection framework could help, but that would not be fun. We can actually solve this ourselves.
 
-This is a classic dependency injection problem. A dependency injection framework could help, but that would not be fun. We can actually solve this ourselves in a clean way.
+A basic solution would be to make services create another services. For example, our `UserService` could have a method `makeFriendsService()` that creates and returns a `FriendService`. This would be a fine solution for a simple app or for a related services (for example if they are in a parent-child relationship), but in the more complex projects we would end with many services being able to create many other unrelated services.
 
-### General Case
-
-Consider the following navigation graph of an imaginary app. It represents an app that has a tab bar controller as a root view controller. The tab bar controller has two tabs. Each tab is a navigation stack that can push three different view controllers. 
-
-<img src="Assets/navigation-graph@2x.png" width="610px">
-
-A user can, for example, navigate from A purple to C purple and then to B purple. They cannot navigation from A purple to B purple.
-
-We can partition the navigation graph into subgraphs. A natural way to do it would be based on the container view controllers like tab bar controller, navigation controller, split controller, etc. There could be other ways to partition the graph though. In our example, first tab's navigation stack would represent one subgraph (blue), while second tab's navigation stack would represent another subgraph (purple).
-
-Each subgraph will have a root view controller. In our example, those would be the two navigation controllers representing blue and purple subgraphs and a tab bar controller representing the whole graph.
-
-A way to solve the dependency pyramid of doom is to let each subgraph's root view controller handle the navigation for the subgraph it defines. View controllers in the subgraph would delegate their navigation to the subgraph's root view controller which would, in turn, resolve the dependencies. Root view controllers themselves would depend on a top-level dependency, e.g. a session, that provides other dependencies.
-
-How do we delegate navigation to the subgraph root view controller? There is a number of ways we could do that, but here is one: expose navigations paths, routes, as a signal and have the binder return both the view controller and the routes signal. We can do that with a publish subject, but let us wrap it into something nicer.
+A general solution is to have a dependency provider and pass that to the binders. A dependency provider is just a top level service (the peek of our pyramid) like a session object or another object that owns or makes dependencies. Here is an example:
 
 ```swift
-public class Router<Route> {
-
-    private let _routes = SafePublishSubject<Route>()
-
-    /// Emits a route when requested by the view controller that is using the router.
-    public var routes: SafeSignal<Route> {
-        return _routes.toSignal()
-    }
-
-    public init() {}
-
-    /// Navigate to the given route.
-    public func navigate(to route: Route) {
-        _routes.next(route)
-    }
+class Session {
+    
+    // Session usually owns the client as it know about authentication
+    let client: APIClient
+    
+    // Session can own services that are alive as long as the app is alive
+    let currentUserService: UserService
+    ...
+    
+    // Session can create other services when needed
+    func makeFriendsService(for user: User) -> FriendsService 
+    ...
 }
 ```
 
-The binder can then instantiate the router and return it alongside the view controller. We can also define a container object for the two instead of returning the tuple. Let us call it `Wireframe`.
-
-```swift
-/// Wireframe is just an object that contains a view controller and a router.
-public class Wireframe<ViewController, Routes> {
-
-    public let viewController: ViewController
-    public let router: Router<Routes>
-
-    public init(for viewController: ViewController, router: Router<Routes>) {
-        self.viewController = viewController
-        self.router = router
-    }
-}
-```
-
-With those two defined we can now refactor our example binder.
+We can then refactor our example to use the `Session` object.
 
 ```swift
 extension ProfileViewController {
 
-    // Routes define all navigations paths that can be taken from this VC
-    enum Routes {
-        case editProfile
-        case friends(ofUser: User)
-    }
-
-    // We've renamed our binder accordingly
-    static func makeWireframe(_ userService: UserService) -> Wireframe<ProfileViewController, Routes> {
-        let viewController = ProfileViewController()
-        let router = Router<Routes>()
+    static func makeViewController(_ session: Session) -> ProfileViewController {
+        let userService = session.currentUserService
         
         ...
         
-        viewController.editProfileButton.reactive.tap
-            .bind(to: viewController) { _ in 
-                router.navigate(to: .editProfile)
-            }
-            
         viewController.friendsButton.reactive.tap
-            .bind(to: viewController) { _ in 
-                router.navigate(to: .friends(ofUser: userService.user)
+            .bind(to: viewController) { viewController in 
+                let friendsViewController = FriendsViewController.makeViewController(user: userService.user, session: session)
+                viewController.navigationController?.pushViewController(friendsViewController, animated: true)
             }
-        
-        return Wireframe(for: viewController, router: router)
-    }
-}
-``` 
-
-Binder now does not present other view controllers, it just triggers the navigation by calling `navigate(to:)` on the router. What is left is to actually perform the navigation. That will be done in the binder of the navigation subgraph's root view controller. Let us assume that our `ProfileViewController` is part of a navigation stack managed by `UINavigationController`. We would implement its binder like this:
-
-```swift
-/// Subclassing gives us the type for our navigation stack...
-class UserNavigationController: UINavigationController {}
-
-/// ...so that we can create a binder only for the specific navigation controller, not for all UINavigationControllers
-extension UserNavigationController {
-
-    static func makeWireframe(_ session: Session) -> Wireframe<UserNavigationController, Void> {
-
-        // ProfileViewController will be our navigation controller's root view controller 
-        let profileWireframe = ProfileViewController.makeWireframe(session.userService)
-        let navigationController = UserNavigationController(rootViewController: profileWireframe.viewController)
-
-        // Handle all routes from ProfileViewController:
-        profileWireframe.router.routes.bind(to: navigationController) { navigationController, route in
-            switch route {
-            case .editProfile:
-                navigationController.presentEditProfileViewController(session: session)
-            case .friends(let user):
-                navigationController.pushFriendsViewController(ofUser: user, session: session)
-            }
-        }
-
-        return Wireframe(for: navigationController)
-    }
-
-    /// Routes can be implemented as method extensions on the view controller.
-    func presentEditProfileViewController(session: Session) {
-        let wireframe = EditProfileViewController.makeWireframe(session.userService)
-
-        // Handle all routes from EditProfileViewController, if any.
-        wireframe.router.routes.bind(to: self) { navigationController, route in
-            switch route {
-                ...
-            }
-        }
-
-        present(wireframe.viewController, animated: true)
-    }
-
-    // Another routing method
-    func pushFriendsViewController(ofUser user: User, session: Session) {
-        let service = FriendsService(user: user, session: Session)
-        let wireframe = FriendsViewController.makeWireframe(service)
-
-        // Handle all routes from FriendsViewController wireframe, if any.
-        wireframe.router.routes.bind(to: self) { navigationController, route in
-            switch route {
-                ...
-            }
-        }
-
-        pushViewController(wireframe.viewController, animated: true)
+        ...
     }
 }
 ```
 
-The first thing that should be noticed is that we are implementing a binder for the navigation controller. This is a very good approach as it is only natural for the navigation controller to manage its stack. It does that by performing specific routes from its child view controllers.
+`FriendsViewController` binder would then call session's `makeFriendsService` method with the given user to get the service it requires.
 
-Next, notice that this binder has a dependency on something called `Session`. Navigation controllers, as well as other navigation subgraph's root view controllers, should depend on the top-level dependency from which one can get or create other dependencies. Having something like a `Session` object that vends other dependencies is a good approach even for the apps that do not have any concept of a user.
-
-With this approach, child view controllers do not need to have dependencies that they do not use. In our example, `ProfileViewController` does not need `FriendsService` as a dependency. It can just trigger a specific route and the `UserNavigationController`'s binder will resolve the dependency.
-
-Routing and dependency injection is probably the most complex aspect of this architecture, but once you grasp it you will see how simple and logical it is. Be sure to check out the [demo app](https://github.com/DeclarativeHub/AbsurdGitter) for a working example.
+Make sure to check out the [demo app](https://github.com/DeclarativeHub/AbsurdGitter) for a working example.
 
 ## Discussion
 
