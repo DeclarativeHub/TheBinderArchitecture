@@ -219,7 +219,7 @@ extension ProfileViewController {
 
 We observe button tap evens with a binding and present the new view controller when the event occurs. Simple.
 
-#### Dependency Piramid Problem
+#### Dependency Pyramid Problem
 
 `EditProfileViewController` has the same dependency as `ProfileViewController` - `UserService`. However, what if that was not the case? What if the view controller that we are about to present has some other dependency unknown to `ProfileViewController`? Let us consider something like the navigation to a friend list that depends on an arbitrary `FriendsService`. Following the same approach
 
