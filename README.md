@@ -314,7 +314,7 @@ When the View Controller presents a lot of data and handles a lot of user input 
 
 The Binder function and related helper functions should live in their own file! I would actually recommend developing every layer of the architecture as a separate framework (target).
 
-Here is an example of simple structure that makes use of frameworks for each layer. The bottom-most layer, the business logic, is implemented by franeworks like API and Services.
+Here is an example of simple structure that makes use of frameworks for each layer. The bottom-most layer, the business logic, is implemented by frameworks like API and Services.
 
 The app also needs the View, or the user interface. We can put that in separate framework called Views. `UIView` subclasses, as well as `UIViewController` subclasses, would live there.
 
@@ -330,7 +330,7 @@ With [RxSwift](https://github.com/ReactiveX/RxSwift) one could leverage Observab
 
 [ReactiveSwift](https://github.com/ReactiveCocoa/ReactiveSwift/) with [ReactiveCocoa](https://github.com/ReactiveCocoa/ReactiveCocoa/#readme) is another great solution. Although it provides hot and cold signal distinction that this architecture does not require, it would be interesting to see Binders built on top of it.
 
-The reason I am blatantly promoting [ReactiveKit](https://github.com/DeclarativeHub/ReactiveKit) and [Bond](https://github.com/DeclarativeHub/Bond) in this article is that I am the author of the two. They are by no means a requirement for this architecture, but they do offer some perks like safe signals, bindings that automatically handle threading, [inline bindings](https://github.com/DeclarativeHub/ReactiveKit#bindings), [loading signals](https://github.com/DeclarativeHub/ReactiveKit#loading-signals) that enable simple lodading state side effects and [observable collection](https://github.com/DeclarativeHub/Bond#observablearray--mutableobservablearray) with out of the box diffing. As I have been evolving the Binder architecture over time, so were the two libraries shaped to make them perfect fit for the architecture.
+The reason I am blatantly promoting [ReactiveKit](https://github.com/DeclarativeHub/ReactiveKit) and [Bond](https://github.com/DeclarativeHub/Bond) in this article is that I am the author of the two. They are by no means a requirement for this architecture, but they do offer some perks like safe signals, bindings that automatically handle threading, [inline bindings](https://github.com/DeclarativeHub/ReactiveKit#bindings), [loading signals](https://github.com/DeclarativeHub/ReactiveKit#loading-signals) that enable simple loading state side effects and [observable collection](https://github.com/DeclarativeHub/Bond#observablearray--mutableobservablearray) with out of the box diffing. As I have been evolving the Binder architecture over time, so were the two libraries shaped to make them perfect fit for the architecture.
 
 ### Is This a New Architecture?
 
